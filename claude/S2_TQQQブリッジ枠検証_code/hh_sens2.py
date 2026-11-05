@@ -1,0 +1,21 @@
+import sys; sys.path.insert(0,'.')
+import numpy as np, pandas as pd, s2engine as E, hh
+mkt=hh.load_all("data"); A=hh.asset_returns(mkt); assets=E.build_assets(mkt); judg=E.judge_states(mkt)
+s2=E.simulate(mkt,assets,judg,E.Cfg())
+D1="D1 DC④（○先進国株／×元本確保）"
+nv,_,_=hh.run_dc(mkt,A,judg,hh.DC_RULES[D1])
+T=hh.build_month_table(s2["nav"],s2["states"],{D1:nv},A,rate_daily=mkt["rate"])
+neg=E.negative_tilt_weights(T["S2"]); roll=np.arange(0,len(T)-60)
+def row(lbl,**kw):
+    kw.setdefault("dc_col",D1); kw.setdefault("cS2",50_000)
+    r=hh.hh_mc(T,**kw); rn=hh.hh_mc(T,weights=neg,**kw); rr=hh.hh_mc(T,start_idx=roll,**kw)
+    print(f"{lbl:44s} P={r['p_hit']:.3f} ネガ={rn['p_hit']:.3f} 歴史窓={rr['p_hit']:.3f} 中央値={r['median']/1e4:,.0f}万 下位10%={r['p10']/1e4:,.0f}万 DD30={r['p_dd30']:.3f} DD50={r['p_dd50']:.3f}")
+row("基準 G5-A（0.85/1.15、遅れ2.5倍）")
+row("閾値 0.80/1.15",lo=0.80); row("閾値 0.90/1.15",lo=0.90); row("閾値 0.85/1.10",hi=1.10); row("閾値 0.85/1.20",hi=1.20)
+row("遅れでもTQQQを使わない（2倍のまま）",behind=2.0)
+row("遅れ2.5倍だけ・先行/到達の調整なし",ahead=2.0,reached=2.0)
+row("到達後も2倍のまま",reached=2.0)
+row("目標ルールなし・S2積立5万だけ",goal=False)
+row("目標ルールなし・積立なし（現状）",goal=False,cS2=0)
+row("G5-A・積立はNISA増額（月10万）",cS2=0,cN=100_000)
+row("G5-A・積立10万（S2に5万＋NISA増額5万）",cS2=50_000,cN=100_000)
