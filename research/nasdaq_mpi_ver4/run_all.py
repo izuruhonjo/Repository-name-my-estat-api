@@ -19,5 +19,5 @@ for end in ['2022-08', '2026-10']:
                 r.pop('taxlog', None)
                 r.update(strategy=strat, infl='物価調整' if infl else '名目3万', period=end); rows.append(r)
 pd.DataFrame(rows).to_pickle('data/results.pkl')
-for f in ['robust.py', 'build_report.py', 'charts.py', 'oos.py', 'oos_report.py', 'perturb.py', 'perturb_report.py', 'simple_rules.py', 'simple_rules_report.py']:
+for f in ['robust.py', 'build_report.py', 'charts.py', 'oos.py', 'oos_report.py', 'perturb.py', 'perturb_report.py', 'simple_rules.py', 'simple_rules_report.py', 'k0_compare.py']:
     subprocess.run([sys.executable, f], check=True)
