@@ -207,6 +207,10 @@ class Cfg:
     rate_mode: str = "entry"       # entry=買シグナル時だけ判定 / monthly=積立日ごとに再判定し必要なら乗換
     lev_lo: float = 2.0
     lev_cost_lo: float = 0.0       # 2倍の総合コスト(年率、較正値)
+    # 一括投資（既定0＝従来と同一）: 初日に initial 円を投入。monthly=None なら従来の積立額、0 なら積立なし
+    initial: float = 0.0
+    monthly: float | None = None
+    init_regime: str | None = None  # "long"/"out": 開始時点の状態（開始前のシグナル履歴から決める場合に指定）
 
 
 def contrib_amount(period: pd.Period, infl_adj: bool) -> float:
@@ -286,6 +290,8 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
     regime = "out"             # 最初の買シグナルまでは1倍へ積立
     if cfg.strategy == "dca3":
         regime = "long"
+    if cfg.strategy == "mpi" and cfg.init_regime is not None:
+        regime = cfg.init_regime
     transfer_amt = 0.0
     ytd_gain, ytd_withheld = 0.0, 0.0
     cf = []                    # [(year, loss)]
@@ -388,9 +394,10 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
                 regime = "long"
                 trades.append((dates[i], "BUY3", amt * fx[i], 0.0))
         # 毎月積立
-        cday = is_last[i] if cfg.contrib_at_month_end else is_first[i]
+        regular = is_last[i] if cfg.contrib_at_month_end else is_first[i]
+        cday = regular or (i == 0 and cfg.initial > 0)
         flows = 0.0
-        if (cday and cfg.strategy == "mpi" and regime == "long" and cfg.rate_mode == "monthly"
+        if (regular and cfg.strategy == "mpi" and regime == "long" and cfg.rate_mode == "monthly"
                 and want_lev(i) != cur[0] and LX().units > 0):
             gross = LX().units * pX(i)
             u, cst = LX().sell_all()
@@ -403,7 +410,8 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
             f = fee(amt); fees_total += f * fx[i]
             LX().buy((amt - f) / pX(i), amt * fx[i])
         if cday:
-            yen = contrib_amount(per[i], cfg.infl_adj)
+            yen = ((contrib_amount(per[i], cfg.infl_adj) if cfg.monthly is None else cfg.monthly) if regular else 0.0) \
+                + (cfg.initial if i == 0 else 0.0)
             contrib_total += yen
             rate = fx[i] + (cfg.fx_fee_yen if cfg.fx else 0.0)
             usd = yen / rate
@@ -455,7 +463,8 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
 
 def irr_monthly(hist, fn, cfg, final):
     per = hist.index.to_period("M").unique()
-    cfs = np.array([-fn(p, cfg.infl_adj) for p in per] + [final])
+    cfs = np.array([-(fn(p, cfg.infl_adj) if cfg.monthly is None else cfg.monthly) for p in per] + [final])
+    cfs[0] -= cfg.initial
     def npv(r):
         t = np.arange(len(cfs)); t[-1] = len(cfs) - 2  # 最終値は最終月末
         return np.sum(cfs / (1 + r) ** t)
