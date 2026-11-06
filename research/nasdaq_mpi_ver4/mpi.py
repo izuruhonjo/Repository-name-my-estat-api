@@ -202,6 +202,11 @@ class Cfg:
     start: str = "1985-10"
     end: str = "2022-08"
     liquidate_tax: bool = True     # 最終時点で清算した場合の税引後も計算
+    # 金利ルール（None なら常に3倍＝従来と同一）: 前営業日の米3M金利 > rate_thr なら2倍(lev_lo)を保有
+    rate_thr: float | None = None
+    rate_mode: str = "entry"       # entry=買シグナル時だけ判定 / monthly=積立日ごとに再判定し必要なら乗換
+    lev_lo: float = 2.0
+    lev_cost_lo: float = 0.0       # 2倍の総合コスト(年率、較正値)
 
 
 def contrib_amount(period: pd.Period, infl_adj: bool) -> float:
@@ -233,6 +238,12 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
     r1 = d.r.values - cfg.one_er * d.dt.values / 365.0
     p3 = np.cumprod(1 + r3); p1 = np.cumprod(1 + r1)
     p3 /= p3[0]; p1 /= p1[0]
+    if cfg.rate_thr is not None:
+        p2 = np.cumprod(1 + lev_returns(d, cfg.lev_lo, cfg.lev_cost_lo, cfg.financing)); p2 /= p2[0]
+    else:
+        p2 = p3
+    assert (1 + r3 > 0).all(), "3倍の日次リターンが-100%以下（全損）"
+    rf_prev = np.r_[d.rf.values[0], d.rf.values[:-1]]   # 判定に使う金利は前営業日値（先読みなし）
     fx = d.fx.values if cfg.fx else np.ones(len(d))
     divs = d.dy.values if cfg.dividends else np.zeros(len(d))
     dates = d.index
@@ -259,7 +270,17 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
         if ex < len(dates):
             exec_map[ex] = int(row.sig)
 
-    L3, L1 = Lot(), Lot()
+    L3, L2, L1 = Lot(), Lot(), Lot()
+    cur = [3]                  # 保有中のレバ倍率（3 or 2）
+
+    def want_lev(i):
+        return 2 if (cfg.rate_thr is not None and rf_prev[i] > cfg.rate_thr) else 3
+
+    def LX():
+        return L3 if cur[0] == 3 else L2
+
+    def pX(i):
+        return p3[i] if cur[0] == 3 else p2[i]
     cash = 0.0                 # USD(またはA/Bでは通貨単位)
     cash_cost = 0.0            # 現金の円換算取得額（C: 為替差損益は現金保有中は非課税扱い→簡略化で無視）
     regime = "out"             # 最初の買シグナルまでは1倍へ積立
@@ -327,7 +348,7 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
             refund_yen = year_end(cur_year)
             cash += refund_yen / fx[i]
             cur_year = dates[i].year
-        val_before_flows = L3.units * p3[i] + L1.units * p1[i] + cash
+        val_before_flows = L3.units * p3[i] + L2.units * p2[i] + L1.units * p1[i] + cash
         if prev_val > 0:
             twr *= val_before_flows / prev_val
         # 1倍の配当
@@ -340,8 +361,8 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
         if cfg.strategy == "mpi" and i in exec_map:
             s = exec_map[i]
             if s == -1 and regime == "long":
-                u, cst = L3.sell_all()
-                gross = u * p3[i]
+                gross = LX().units * pX(i)
+                u, cst = LX().sell_all()
                 f = fee(gross); fees_total += f * fx[i]
                 net = gross - f
                 t = realize(net * fx[i], cst, i)
@@ -359,15 +380,28 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
                     cash += net - t / fx[i]
                     trades.append((dates[i], "SELL1", gross * fx[i], (net * fx[i] - cst)))
                 amt = cash
+                cur[0] = want_lev(i)
                 if amt > 0:
                     f = fee(amt); fees_total += f * fx[i]
-                    L3.buy((amt - f) / p3[i], amt * fx[i])
+                    LX().buy((amt - f) / pX(i), amt * fx[i])
                     cash = 0.0
                 regime = "long"
                 trades.append((dates[i], "BUY3", amt * fx[i], 0.0))
         # 毎月積立
         cday = is_last[i] if cfg.contrib_at_month_end else is_first[i]
         flows = 0.0
+        if (cday and cfg.strategy == "mpi" and regime == "long" and cfg.rate_mode == "monthly"
+                and want_lev(i) != cur[0] and LX().units > 0):
+            gross = LX().units * pX(i)
+            u, cst = LX().sell_all()
+            f = fee(gross); fees_total += f * fx[i]
+            net = gross - f
+            t = realize(net * fx[i], cst, i)
+            amt = net - t / fx[i] + cash; cash = 0.0
+            trades.append((dates[i], f"SWITCH{cur[0]}", gross * fx[i], (net * fx[i] - cst)))
+            cur[0] = want_lev(i)
+            f = fee(amt); fees_total += f * fx[i]
+            LX().buy((amt - f) / pX(i), amt * fx[i])
         if cday:
             yen = contrib_amount(per[i], cfg.infl_adj)
             contrib_total += yen
@@ -376,10 +410,10 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
             fxfee_total += yen - usd * fx[i]
             flows += usd
             f = fee(usd); fees_total += f * fx[i]
-            tgt = L3 if (regime == "long" or cfg.strategy == "dca3") else L1
+            tgt = LX() if (regime == "long" or cfg.strategy == "dca3") else L1
             if cfg.strategy == "dca1":
                 tgt = L1
-            px = p3[i] if tgt is L3 else p1[i]
+            px = p1[i] if tgt is L1 else pX(i)
             tgt.buy((usd - f) / px, yen)
             # 売シグナル中: 売却資金の1%を毎月1倍へ
             if cfg.strategy == "mpi" and regime == "out" and cash > 0:
@@ -387,28 +421,31 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
                 f = fee(amt); fees_total += f * fx[i]
                 L1.buy((amt - f) / p1[i], amt * fx[i])
                 cash -= amt
-        val = L3.units * p3[i] + L1.units * p1[i] + cash
+        val = L3.units * p3[i] + L2.units * p2[i] + L1.units * p1[i] + cash
         prev_val = val
-        rows.append((dates[i], val * fx[i], val, regime, contrib_total, twr))
+        rows.append((dates[i], val * fx[i], val, regime + ("2" if (regime == "long" and cur[0] == 2) else ""), contrib_total, twr))
         if prev_val > 0 and flows > 0:
             pass
 
     hist = pd.DataFrame(rows, columns=["date", "value_jpy", "value_ccy", "regime", "contrib", "twr"]).set_index("date")
     # 最終清算税
     i = len(d) - 1
-    unreal = (L3.units * p3[i] * fx[i] - L3.cost) + (L1.units * p1[i] * fx[i] - L1.cost)
+    unreal = (L3.units * p3[i] * fx[i] - L3.cost) + (L2.units * p2[i] * fx[i] - L2.cost) + (L1.units * p1[i] * fx[i] - L1.cost)
     if cfg.jp_tax:
         g = ytd_gain + unreal
         avail = sum(a for (y, a) in cf if dates[i].year - y <= 3)
         liq_tax = TAX * max(0.0, g - avail) - ytd_withheld
     else:
-        liq_tax = TAX * (max(0.0, L3.units * p3[i] * fx[i] - L3.cost) + max(0.0, L1.units * p1[i] * fx[i] - L1.cost))
+        liq_tax = TAX * (max(0.0, L3.units * p3[i] * fx[i] - L3.cost) + max(0.0, L2.units * p2[i] * fx[i] - L2.cost)
+                         + max(0.0, L1.units * p1[i] * fx[i] - L1.cost))
     if not cfg.tax_on:
         liq_tax = 0.0
     final = hist.value_jpy.iloc[-1]
     res = dict(case=cfg.name, end=str(dates[-1].date()), contrib=contrib_total, final_pre_liq=final,
                final_after_liq=final - liq_tax, tax_paid=tax_paid_total, fees=fees_total,
                fx_fees=fxfee_total, div_tax=divtax_total, n_trades=sum(1 for t in trades if t[1] != "BUY3"),
+               n_switch=sum(1 for t in trades if t[1].startswith("SWITCH")),
+               share_2x=float(np.mean([r[3] == "long2" for r in rows])) if rows else 0.0,
                mdd_twr=float((hist.twr / hist.twr.cummax() - 1).min()),
                mdd_value=float((hist.value_jpy / hist.value_jpy.cummax() - 1).min()))
     res["taxlog"] = taxlog
