@@ -211,6 +211,10 @@ class Cfg:
     initial: float = 0.0
     monthly: float | None = None
     init_regime: str | None = None  # "long"/"out": 開始時点の状態（開始前のシグナル履歴から決める場合に指定）
+    # 売った後の資金の置き場（既定 drip＝従来と同一）: drip=現金→毎月transfer_pctずつ1倍 / cash=全額USD現金(金利0)
+    #   mmf=全額 米ドルMMF(米3M金利−mmf_fee、分配は毎日20.315%課税) / one=全額すぐ1倍
+    exit_mode: str = "drip"
+    mmf_fee: float = 0.003
 
 
 def contrib_amount(period: pd.Period, infl_adj: bool) -> float:
@@ -354,6 +358,10 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
             refund_yen = year_end(cur_year)
             cash += refund_yen / fx[i]
             cur_year = dates[i].year
+        if cfg.exit_mode == "mmf" and cash > 0:
+            cash *= 1 + max(d.rf.values[i] - cfg.mmf_fee, 0.0) * ((1 - TAX) if cfg.tax_on else 1.0) * d.dt.values[i] / 365.0
+        if i == 0 and regime == "long" and cfg.strategy == "mpi":
+            cur[0] = want_lev(0)
         val_before_flows = L3.units * p3[i] + L2.units * p2[i] + L1.units * p1[i] + cash
         if prev_val > 0:
             twr *= val_before_flows / prev_val
@@ -374,6 +382,9 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
                 t = realize(net * fx[i], cst, i)
                 cash += net - t / fx[i]
                 transfer_amt = cash * cfg.transfer_pct
+                if cfg.exit_mode == "one" and cash > 0:
+                    amt = cash; f = fee(amt); fees_total += f * fx[i]
+                    L1.buy((amt - f) / p1[i], amt * fx[i]); cash = 0.0
                 regime = "out"
                 trades.append((dates[i], "SELL3", gross * fx[i], (net * fx[i] - cst)))
             elif s == 1 and regime == "out":
@@ -417,14 +428,17 @@ def run(daily: pd.DataFrame, sig: pd.DataFrame, cfg: Cfg, exec_dates=None):
             usd = yen / rate
             fxfee_total += yen - usd * fx[i]
             flows += usd
-            f = fee(usd); fees_total += f * fx[i]
-            tgt = LX() if (regime == "long" or cfg.strategy == "dca3") else L1
-            if cfg.strategy == "dca1":
-                tgt = L1
-            px = p1[i] if tgt is L1 else pX(i)
-            tgt.buy((usd - f) / px, yen)
+            if cfg.strategy == "mpi" and regime == "out" and cfg.exit_mode in ("cash", "mmf"):
+                cash += usd
+            else:
+                f = fee(usd); fees_total += f * fx[i]
+                tgt = LX() if (regime == "long" or cfg.strategy == "dca3") else L1
+                if cfg.strategy == "dca1":
+                    tgt = L1
+                px = p1[i] if tgt is L1 else pX(i)
+                tgt.buy((usd - f) / px, yen)
             # 売シグナル中: 売却資金の1%を毎月1倍へ
-            if cfg.strategy == "mpi" and regime == "out" and cash > 0:
+            if cfg.strategy == "mpi" and regime == "out" and cash > 0 and cfg.exit_mode == "drip":
                 amt = min(transfer_amt, cash)
                 f = fee(amt); fees_total += f * fx[i]
                 L1.buy((amt - f) / p1[i], amt * fx[i])
