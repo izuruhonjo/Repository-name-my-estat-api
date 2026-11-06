@@ -1,3 +1,5 @@
 __pycache__/
 out_imp/recalc/
 out_imp/*.xlsx
+out_k0/recalc/
+out_k0/*.xlsx
