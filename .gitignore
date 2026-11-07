@@ -2,3 +2,7 @@
 claude/S2_TQQQブリッジ枠検証_code/out_dc/paths_base.npz
 claude/S2_TQQQブリッジ枠検証_code/out_dc/*.xlsx
 claude/S2_TQQQブリッジ枠検証_code/out_dc/recalc/
+# 総合マニュアル（11/7）：再生成できる大きい中間ファイル（tm_calc.py・tm_excel.py で作り直せる。Excel本体は claude/ にコミット済み）
+claude/S2_TQQQブリッジ枠検証_code/out_tm/mc_paths.csv
+claude/S2_TQQQブリッジ枠検証_code/out_tm/*.xlsx
+claude/S2_TQQQブリッジ枠検証_code/out_tm/recalc/

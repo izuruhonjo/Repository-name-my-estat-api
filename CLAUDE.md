@@ -4,9 +4,9 @@
 
 ユーザーが「続けて」とだけ言ったら、確認の質問をせずに次を順に行う。
 
-1. `git fetch origin` して、`claude/引き継ぎ_2026-11-05.md` の最新コミットがあるブランチを使う（2026-11-07夜の③のあとは `claude/wonderful-sagan-6zqnz1`、その前は `claude/great-dijkstra-vjan3b`。クラウド環境は「my-estat-api-quant」を使う。旧 `claude/s2-tqqq-bridge-validation-2026-11-05` の全履歴を含む）。セッションの指定ブランチが別なら、そこへ最新ブランチを取り込んでから作業する
+1. `git fetch origin` して、`claude/引き継ぎ_2026-11-05.md` の最新コミットがあるブランチを使う（2026-11-07夜の総合マニュアルのあとは `claude/sweet-planck-5wu10l`、その前の③のあとは `claude/wonderful-sagan-6zqnz1`、その前は `claude/great-dijkstra-vjan3b`。クラウド環境は「my-estat-api-quant」を使う。旧 `claude/s2-tqqq-bridge-validation-2026-11-05` の全履歴を含む）。セッションの指定ブランチが別なら、そこへ最新ブランチを取り込んでから作業する
 2. `claude/引き継ぎ_2026-11-05.md` を読む（決定事項・未了タスク・次の一手）
-3. `claude/S2運用マニュアル.md` を読む（今の運用ルールの正）
+3. `claude/S2運用マニュアル.md` を読む（今の運用ルールの正）。全体の地図（世帯・DC・NISAとQQQの比較、売買ルールの意義と評価）は `claude/総合マニュアル_S2K0_DCR0_NISA_2026-11-07.md`
 4. 引き継ぎメモの「次の一手」の先頭から作業を再開し、最初の返信で「どこから再開したか」を1行で言う
 
 ## 毎回の返信のルール
