@@ -1,0 +1,4 @@
+# DC規則の一斉比較③：再生成できる大きい中間ファイル（dc_run.py・dc_excel.py で作り直せる。Excel本体は claude/ にコミット済み）
+claude/S2_TQQQブリッジ枠検証_code/out_dc/paths_base.npz
+claude/S2_TQQQブリッジ枠検証_code/out_dc/*.xlsx
+claude/S2_TQQQブリッジ枠検証_code/out_dc/recalc/
