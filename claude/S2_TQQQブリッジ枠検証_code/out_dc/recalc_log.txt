@@ -1,0 +1,2 @@
+Warning: failed to launch javaldx - java may not function correctly
+convert /home/user/Repository-name-my-estat-api/claude/S2_TQQQブリッジ枠検証_code/out_dc/DC規則の一斉比較_Excel突合.xlsx as a Calc document -> /home/user/Repository-name-my-estat-api/claude/S2_TQQQブリッジ枠検証_code/out_dc/recalc/DC規則の一斉比較_Excel突合.xlsx using filter : Calc Office Open XML
