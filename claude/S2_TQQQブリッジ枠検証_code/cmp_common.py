@@ -274,7 +274,7 @@ def scen_kw(T, scen):
 
 def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=None, jump=None,
                  gp_gain0=GP_GAIN0, cDC=27_500, cN=50_000, return_paths=False, tax=True, one_step=True,
-                 reach_liq=False, record=False, snap=False):
+                 reach_liq=False, record=False, snap=False, release_at=None, release_cond=False):
     """
     cand: CANDS の要素。jump: None か dict(p=月あたり確率, J=NASDAQ100の1日の下落率(負), total_loss=TQQQ全損か)
     7年（months=84）は「5年の到達線→5年末に未達なら残り2年で引き直し」。
@@ -349,6 +349,13 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
                 new_lv = lv + np.clip(des - lv, -1, 1) if one_step else des
         else:
             new_lv = np.full(n, 1)
+        if release_at is not None and t >= release_at:
+            new_lv = np.full(n, 1)                      # 床を外す（K0の全額に戻す）
+        if release_cond:                                # 5年末に1億以上なら5年で外す、未達なら7年まで床を続けて7年で外す
+            if t >= 84:
+                new_lv = np.full(n, 1)
+            elif t >= 60:
+                new_lv = np.where(H60 >= G, 1, new_lv)
         nswitch += (new_lv != lv) & (t > 0)
         lv = new_lv
         if use_tipp:
