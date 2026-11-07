@@ -274,7 +274,7 @@ def scen_kw(T, scen):
 
 def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=None, jump=None,
                  gp_gain0=GP_GAIN0, cDC=27_500, cN=50_000, return_paths=False, tax=True, one_step=True,
-                 reach_liq=False, record=False):
+                 reach_liq=False, record=False, snap=False):
     """
     cand: CANDS の要素。jump: None か dict(p=月あたり確率, J=NASDAQ100の1日の下落率(負), total_loss=TQQQ全損か)
     7年（months=84）は「5年の到達線→5年末に未達なら残り2年で引き直し」。
@@ -314,6 +314,12 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
     taxpaid = np.zeros(n); nswitch = np.zeros(n); lvl_months = np.zeros((n, 4))
     H60 = None; H60L = None; hit60 = None
     lam_rec = np.zeros(n)
+    reached = np.zeros(n, bool)
+    SN = None
+    if snap:
+        SN = dict(t=np.full(n, -1), Wb=np.zeros(n), Bb=np.zeros(n), pool=np.zeros(n), D=np.zeros(n), N=np.zeros(n),
+                  tax=np.zeros(n), Wa=np.zeros(n), wold=np.zeros((n, len(ASSETS))), wnew=np.zeros((n, len(ASSETS))),
+                  ret=np.zeros(n, bool), Ha=np.zeros(n))
     Hrec = np.zeros((n, months)) if record else None
     LVrec = np.zeros((n, months), int) if record else None
     for t in range(months):
@@ -350,6 +356,7 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
             lam_new = np.floor(lam_new * 4 + 1e-9) / 4
             lam = np.where(lv == 3, lam_new, 1.0)
         lvl_months[np.arange(n), lv] += 1
+        first_now = (lv == 3) & ~reached if snap else None
         # ---- 各スリーブ：売却（含み益の実現と税）→ 月次リターン ----
         jump_now = None
         if jump is not None:
@@ -375,6 +382,11 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
                 pool[:, b] -= u; use_total += u
             tax = TAU * (gp - use_total) if tax_on else np.zeros(n)
             pool[:, 0] += np.maximum(-g, 0.0)
+            if snap and j == 0:
+                fm = first_now
+                SN["t"][fm] = t; SN["Wb"][fm] = Wj[j][fm]; SN["Bb"][fm] = Bj[j][fm]; SN["pool"][fm] = pool.sum(1)[fm]
+                SN["D"][fm] = D[fm]; SN["N"][fm] = N[fm]; SN["tax"][fm] = tax[fm]; SN["Wa"][fm] = (Wj[j] - tax)[fm]
+                SN["wold"][fm] = wcur[j][fm]; SN["wnew"][fm] = wnew[fm]; SN["ret"][fm] = ret[m][fm]
             Wj[j] = Wj[j] - tax
             Bj[j] = Bj[j] + g - tax
             taxpaid += tax
@@ -399,6 +411,8 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
         H = Wtot + D + N
         if record:
             Hrec[:, t] = H; LVrec[:, t] = lv
+        if snap:
+            reached |= first_now
         peak = np.maximum(peak, H); dd = H / peak - 1
         mindd = np.minimum(mindd, dd)
         hit |= H >= G
@@ -409,7 +423,7 @@ def household_mc(T, S, cand, months=60, n=100_000, seed=42, scen="基本", M=Non
     Wtot = sum(Wj)
     lat = TAU * np.maximum(Wtot - sum(Bj) - pool.sum(1), 0.0)
     out = dict(H=H, HL=H - lat, mindd=mindd, hit=hit, W=Wtot, D=D, N=N, tax=taxpaid, nswitch=nswitch,
-               lvl=lvl_months / months, H60=H60, H60L=H60L, mindd60=mindd60, hit60=hit60, M=M, Hrec=Hrec, LVrec=LVrec)
+               lvl=lvl_months / months, H60=H60, H60L=H60L, mindd60=mindd60, hit60=hit60, M=M, Hrec=Hrec, LVrec=LVrec, SN=SN)
     return out
 
 
