@@ -3,3 +3,7 @@ out_imp/recalc/
 out_imp/*.xlsx
 out_k0/recalc/
 out_k0/*.xlsx
+out_cmp/recalc/
+out_cmp/*.xlsx
+out_cmp/paths_*.npz
+out_cmp/M_base_84.npy
